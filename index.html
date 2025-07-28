@@ -1,0 +1,395 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DJ Artwork Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    @font-face {
+      font-family: 'NeueHaasDisplayXXThin';
+      src: url('fonts/NeueHaasDisplayXXThin.ttf') format('truetype');
+    }
+    @font-face {
+      font-family: 'NeueHaasDisplayThin';
+      src: url('fonts/NeueHaasDisplayThin.ttf') format('truetype');
+    }
+    body {
+      background: #111;
+      color: #fff;
+      font-family: 'NeueHaasDisplayXXThin', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: start;
+      padding: 20px;
+      height: 100vh;
+      margin: 0;
+    }
+    canvas {
+      margin-top: 20px;
+      background: #000;
+    }
+    select, button {
+      margin-top: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+<div class="split" style="display:flex; width:100vw; height:100vh;">
+  <div class="pane" style="flex:1; overflow:auto; padding:10px;">
+  <h1>DJ Artwork Generator</h1>
+  <select id="showSelector">
+    <option value="">Loading dates...</option>
+  </select>
+  <button onclick="drawArtwork()">Generate Artwork</button>
+  <canvas id="artCanvas" width="1080" height="1920"></canvas>
+
+  <script>
+    function formatDateReadable(dateStr) {
+      const date = new Date(dateStr);
+      if (isNaN(date)) return dateStr;
+
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+      ];
+
+      const day = date.getDate();
+      const daySuffix = (d => {
+        if (d > 3 && d < 21) return 'th';
+        switch (d % 10) {
+          case 1: return 'st';
+          case 2: return 'nd';
+          case 3: return 'rd';
+          default: return 'th';
+        }
+      })(day);
+
+      return `${days[date.getDay()]} ${day}${daySuffix} ${months[date.getMonth()]}`;
+    }
+
+    let template;
+    let groupedShows = {};
+    const canvas = document.getElementById('artCanvas');
+    const ctx = canvas.getContext('2d');
+    const showSelector = document.getElementById('showSelector');
+
+    Papa.parse("https://docs.google.com/spreadsheets/d/e/2PACX-1vTavGvSojxM1vYpMv0FSoC-WzIK3IqTYPNl1SYbya4iV8VJUaEmHso7yghmGQPLJvwpsEMzKjbonPDz/pub?output=csv", {
+      download: true,
+      header: true,
+      complete: function(results) {
+        const rows = results.data;
+        rows.forEach(row => {
+          const date = row.Date;
+          if (!date) return;
+          if (!groupedShows[date]) groupedShows[date] = [];
+          groupedShows[date].push(row);
+        });
+
+        showSelector.innerHTML = '<option value="">Select a date</option>';
+        Object.keys(groupedShows).forEach(date => {
+          const option = new Option(date, date);
+          showSelector.appendChild(option);
+        });
+      }
+    });
+
+    async function loadTemplate() {
+      const res = await fetch('template.json');
+      template = await res.json();
+    }
+
+    function wrapText(text, x, y, maxWidth, lineHeight) {
+      const words = text.split(" ");
+      let line = "";
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + " ";
+        const metrics = ctx.measureText(testLine);
+        const testWidth = metrics.width;
+        if (testWidth > maxWidth && n > 0) {
+          ctx.fillText(line, x, y);
+          line = words[n] + " ";
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, x, y);
+      return y + lineHeight;
+    }
+
+    async function drawArtwork() {
+      if (!template) await loadTemplate();
+      const selectedDate = showSelector.value;
+      const rows = groupedShows[selectedDate];
+      if (!rows || rows.length === 0) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // draw all image layers first
+      for (const layer of template.layers.filter(l => l.type === 'image')) {
+        const img = new Image();
+        img.src = 'assets/' + layer.src;
+        await new Promise(res => {
+          img.onload = () => {
+            ctx.globalAlpha = layer.opacity || 1;
+            ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
+            res();
+          };
+        });
+      }
+
+      // draw all text layers after
+      for (const layer of template.layers.filter(l => l.type === 'text')) {
+        ctx.globalAlpha = layer.opacity || 1;
+        ctx.fillStyle = layer.color;
+        let fontSize = layer.fontSize;
+
+        if (layer.name === "Show Data") {
+          const baseSize = 64;
+          const requiredLines = rows.length * 2;
+          const availableHeight = 1920 - layer.y - 100;
+          const maxLineHeight = availableHeight / requiredLines;
+          fontSize = Math.min(baseSize, maxLineHeight - 10);
+          if (fontSize < 20) fontSize = 20;
+        }
+
+        ctx.font = `${fontSize}px ${layer.font}`;
+        ctx.textAlign = layer.align || "left";
+        ctx.textBaseline = "top";
+
+        if (layer.name === "Date") {
+          ctx.fillText(formatDateReadable(selectedDate), layer.x, layer.y);
+        } else if (layer.name === "Show Data") {
+          const maxWidth = 900;
+          const lineHeight = fontSize + 10;
+          let y = layer.y;
+
+          rows.forEach(row => {
+            const nowPlaying = row["Now Playing"] || "";
+            const dj = row["DJ"] || "";
+            const includeDJ = !nowPlaying.toLowerCase().includes(dj.toLowerCase());
+            const line1 = includeDJ && dj ? `${nowPlaying} w/ ${dj}` : nowPlaying;
+            const line2 = row["A-B"] || "";
+
+            y = wrapText(line1, layer.x, y, maxWidth, lineHeight);
+            y = wrapText(line2, layer.x, y, maxWidth, lineHeight);
+            y += 30;
+          });
+        }
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    loadTemplate();
+  </script>
+  </div>
+  <div class="pane" style="flex:1; overflow:auto; padding:10px; background:#000;">
+    <h2 style="font-family:sans-serif;">🎥 Mesh Video Generator</h2>
+    <select id="videoSelector"><option>Loading...</option></select><br/>
+    <button onclick="startRecording()">Record 30s</button>
+    <a id="downloadLink" download="dj-mesh.webm">⬇️ WebM</a>
+    <button id="convertMP4" onclick="convertToMP4()">Convert to MP4</button>
+    <a id="mp4Download" download="dj-mesh.mp4">⬇️ MP4</a><br/>
+    
+  <div style="margin-bottom: 10px;">
+    <label>Color 1 <input type="color" id="color1" value="#53DF83" /></label>
+    <label>Color 2 <input type="color" id="color2" value="#47D2E9" /></label>
+    <label>Color 3 <input type="color" id="color3" value="#3F3F3F" /></label>
+    <label>Color 4 <input type="color" id="color4" value="#EEEEEE" /></label>
+    <br/>
+    <label>Speed <input type="range" id="speedSlider" min="0.1" max="3" value="1" step="0.1" /></label>
+    <button onclick="randomizeMesh()">🎲 Randomize</button>
+  </div>
+  <canvas id="videoCanvas" width="1080" height="1920" style="margin-top:20px;"></canvas>
+  </div>
+</div>
+</body>
+</html>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<script>
+const videoCanvas = document.getElementById("videoCanvas");
+const videoCtx = videoCanvas?.getContext("2d");
+let groupedData = {};
+
+function formatDateReadable(dateStr) {
+  const date = new Date(dateStr);
+  if (isNaN(date)) return dateStr;
+  const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const d = date.getDate();
+  const suffix = (d > 3 && d < 21) ? 'th' : ['th','st','nd','rd'][d % 10] || 'th';
+  return `${days[date.getDay()]} ${d}${suffix} ${months[date.getMonth()]}`;
+}
+
+Papa.parse("https://docs.google.com/spreadsheets/d/e/2PACX-1vTavGvSojxM1vYpMv0FSoC-WzIK3IqTYPNl1SYbya4iV8VJUaEmHso7yghmGQPLJvwpsEMzKjbonPDz/pub?output=csv", {
+  download: true,
+  header: true,
+  complete: (results) => {
+    const rows = results.data;
+    rows.forEach(row => {
+      const date = row.Date;
+      if (!groupedData[date]) groupedData[date] = [];
+      groupedData[date].push(row);
+    });
+
+    const selector = document.getElementById("videoSelector");
+    selector.innerHTML = '<option value="">Select a date</option>';
+    Object.keys(groupedData).forEach(date => {
+      const opt = new Option(date, date);
+      selector.appendChild(opt);
+    });
+  }
+});
+
+document.getElementById("videoSelector")?.addEventListener("change", () => {
+  const date = videoSelector.value;
+  if (groupedData[date]) drawMeshOverlay(groupedData[date], date);
+});
+
+function drawMeshOverlay(rows, date) {
+  videoCtx.clearRect(0, 0, 1080, 1920);
+  let y = 320;
+  const center = 540;
+  let fontSize = 64;
+  if (rows.length > 6) fontSize = 48;
+  if (rows.length > 8) fontSize = 42;
+
+  videoCtx.fillStyle = "white";
+  videoCtx.textAlign = "center";
+  videoCtx.textBaseline = "top";
+  videoCtx.font = `${fontSize}px NeueHaasDisplayRoman, sans-serif`;
+
+  rows.forEach(row => {
+    const np = row["Now Playing"] || "";
+    const dj = row["DJ"] || "";
+    const ab = row["A-B"] || "";
+    const showLine = (!np.toLowerCase().includes(dj.toLowerCase()) && dj) ? `${np} w/ ${dj}` : np;
+    videoCtx.fillText(showLine, center, y);
+    y += fontSize + 10;
+    videoCtx.fillText(ab, center, y);
+    y += 80;
+  });
+
+  videoCtx.font = `40px NeueHaasDisplayThin, sans-serif`;
+  videoCtx.fillText(formatDateReadable(date), center, 1700);
+}
+
+const points = Array.from({ length: 6 }, () => ({
+  x: Math.random() * 1080,
+  y: Math.random() * 1920,
+  r: 300 + Math.random() * 200,
+  angle: Math.random() * Math.PI * 2
+}));
+
+function drawMesh() {
+  if (!videoCtx) return;
+  videoCtx.filter = "blur(40px)";
+  videoCtx.clearRect(0, 0, 1080, 1920);
+  const colors = ["#53DF83", "#47D2E9", "#3F3F3F", "#EEEEEE"];
+  points.forEach((p, i) => {
+    const g = videoCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    g.addColorStop(0, colors[i % colors.length] + "D0");
+    g.addColorStop(1, colors[i % colors.length] + "00");
+    videoCtx.fillStyle = g;
+    videoCtx.beginPath();
+    videoCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    videoCtx.fill();
+    p.x += Math.sin(p.angle) * 0.8;
+    p.y += Math.cos(p.angle) * 0.8;
+    p.angle += 0.01;
+  });
+  videoCtx.filter = "none";
+  const date = document.getElementById("videoSelector")?.value;
+  if (groupedData[date]) drawMeshOverlay(groupedData[date], date);
+  requestAnimationFrame(drawMesh);
+}
+drawMesh();
+
+let chunks = [], recorder;
+const stream = videoCanvas?.captureStream(30);
+recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+recorder.ondataavailable = e => chunks.push(e.data);
+recorder.onstop = () => {
+  const blob = new Blob(chunks, { type: "video/webm" });
+  const url = URL.createObjectURL(blob);
+  document.getElementById("downloadLink").href = url;
+  document.getElementById("downloadLink").style.display = "inline-block";
+  document.getElementById("convertMP4").style.display = "inline-block";
+  window.latestBlob = blob;
+};
+
+function startRecording() {
+  chunks = [];
+  recorder.start();
+  setTimeout(() => recorder.stop(), 30000);
+}
+
+async function convertToMP4() {
+  const { createFFmpeg, fetchFile } = FFmpeg;
+  const ffmpeg = createFFmpeg({ log: true });
+  await ffmpeg.load();
+  ffmpeg.FS("writeFile", "input.webm", await fetchFile(window.latestBlob));
+  await ffmpeg.run("-i", "input.webm", "-c:v", "libx264", "output.mp4");
+  const data = ffmpeg.FS("readFile", "output.mp4");
+  const mp4Blob = new Blob([data.buffer], { type: "video/mp4" });
+  const mp4Url = URL.createObjectURL(mp4Blob);
+  const mp4Link = document.getElementById("mp4Download");
+  mp4Link.href = mp4Url;
+  mp4Link.style.display = "inline-block";
+}
+</script>
+
+<script>
+function getMeshColors() {
+  return [
+    document.getElementById("color1").value,
+    document.getElementById("color2").value,
+    document.getElementById("color3").value,
+    document.getElementById("color4").value
+  ];
+}
+
+function randomizeMesh() {
+  points.forEach(p => {
+    p.x = Math.random() * 1080;
+    p.y = Math.random() * 1920;
+    p.r = 300 + Math.random() * 200;
+    p.angle = Math.random() * Math.PI * 2;
+  });
+  document.getElementById("color1").value = "#"+Math.floor(Math.random()*16777215).toString(16);
+  document.getElementById("color2").value = "#"+Math.floor(Math.random()*16777215).toString(16);
+  document.getElementById("color3").value = "#"+Math.floor(Math.random()*16777215).toString(16);
+  document.getElementById("color4").value = "#"+Math.floor(Math.random()*16777215).toString(16);
+}
+
+function drawMesh() {
+  if (!videoCtx) return;
+  videoCtx.filter = "blur(40px)";
+  videoCtx.clearRect(0, 0, 1080, 1920);
+  const colors = getMeshColors();
+  const speed = parseFloat(document.getElementById("speedSlider")?.value || 1);
+  points.forEach((p, i) => {
+    const g = videoCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    g.addColorStop(0, colors[i % colors.length] + "D0");
+    g.addColorStop(1, colors[i % colors.length] + "00");
+    videoCtx.fillStyle = g;
+    videoCtx.beginPath();
+    videoCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    videoCtx.fill();
+    p.x += Math.sin(p.angle) * speed;
+    p.y += Math.cos(p.angle) * speed;
+    p.angle += 0.01 * speed;
+  });
+  videoCtx.filter = "none";
+  const date = document.getElementById("videoSelector")?.value;
+  if (groupedData[date]) drawMeshOverlay(groupedData[date], date);
+  requestAnimationFrame(drawMesh);
+}
+</script>
