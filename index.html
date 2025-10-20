@@ -134,7 +134,7 @@
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // draw all image layers first
+      // draw image layers first
       for (const layer of template.layers.filter(l => l.type === 'image')) {
         const img = new Image();
         img.src = 'assets/' + layer.src;
@@ -147,7 +147,7 @@
         });
       }
 
-      // draw all text layers after
+      // draw text layers next
       for (const layer of template.layers.filter(l => l.type === 'text')) {
         ctx.globalAlpha = layer.opacity || 1;
         ctx.fillStyle = layer.color;
@@ -176,8 +176,17 @@
           rows.forEach(row => {
             const nowPlaying = row["Now Playing"] || "";
             const dj = row["DJ"] || "";
+            const guestDJ = row["Guest DJ"] || "";
+            const guestMC = row["Guest MC"] || "";
+
+            // build guest suffix
+            let guestSuffix = "";
+            if (guestDJ) guestSuffix += ` + ${guestDJ}`;
+            if (guestMC) guestSuffix += ` + ${guestMC}`;
+
+            // main show line logic
             const includeDJ = !nowPlaying.toLowerCase().includes(dj.toLowerCase());
-            const line1 = includeDJ && dj ? `${nowPlaying} w/ ${dj}` : nowPlaying;
+            const line1 = includeDJ && dj ? `${nowPlaying} w/ ${dj}${guestSuffix}` : `${nowPlaying}${guestSuffix}`;
             const line2 = row["A-B"] || "";
 
             y = wrapText(line1, layer.x, y, maxWidth, lineHeight);
