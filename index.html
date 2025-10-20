@@ -56,10 +56,10 @@
       const date = new Date(dateStr);
       if (isNaN(date)) return dateStr;
 
-      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
       const months = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
+        "January","February","March","April","May","June",
+        "July","August","September","October","November","December"
       ];
 
       const day = date.getDate();
@@ -134,8 +134,12 @@
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // draw image layers first
+      // draw image layers first (skip any that look like underline/line/site)
       for (const layer of template.layers.filter(l => l.type === 'image')) {
+        const src = l => l.src?.toLowerCase() || "";
+        const name = l => l.name?.toLowerCase() || "";
+        if (src(layer).includes('line') || src(layer).includes('site') || name(layer).includes('line') || name(layer).includes('site')) continue;
+
         const img = new Image();
         img.src = 'assets/' + layer.src;
         await new Promise(res => {
@@ -147,7 +151,7 @@
         });
       }
 
-      // draw text layers next
+      // draw text layers
       for (const layer of template.layers.filter(l => l.type === 'text')) {
         ctx.globalAlpha = layer.opacity || 1;
         ctx.fillStyle = layer.color;
