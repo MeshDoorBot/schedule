@@ -4,17 +4,7 @@
     "height": 1920
   },
   "layers": [
-    {
-      "name": "Date",
-      "type": "text",
-      "font": "NeueHaasDisplayXXThin",
-      "fontSize": 64,
-      "color": "#ffffff",
-      "x": 540,
-      "y": 323,
-      "align": "center",
-      "opacity": 1
-    },
+
     {
       "name": "Show Data",
       "type": "text",
